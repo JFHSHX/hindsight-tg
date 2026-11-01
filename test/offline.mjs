@@ -35,7 +35,7 @@ function makeCtx(capture) {
 const names = [];
 apply(makeCtx((d) => names.push(d.name)), { dataDir });
 console.log('registered:', names.join(', '));
-if (names.join(',') !== 'tg_status,tg_retain,tg_recall,tg_forget,tg_digest,tg_pin') throw new Error('工具集不符');
+if (names.join(',') !== 'tg_status,tg_retain,tg_recall,tg_forget,tg_edit,tg_digest,tg_pin') throw new Error('工具集不符');
 
 // 2) 拿到定义对象，直接调用 execute
 const defs = {};

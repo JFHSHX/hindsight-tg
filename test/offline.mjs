@@ -53,6 +53,12 @@ fs.writeFileSync(path.join(dataDir, 'memory.jsonl'), rows.map((r) => JSON.string
 const r1 = await defs.tg_recall.execute({ query: '深夜工作' });
 console.log('recall "深夜工作" →', r1.count, '|', r1.hits[0]?.text);
 if (r1.count !== 1) throw new Error('关键词召回失败');
+// 时间前缀：直接测 __internals.stampDate（retainOne 路径的实弹验证在 e2e）
+const stampI = (await import('../lib/index.js')).__internals;
+const st1 = stampI.stampDate('裸文本');
+if (!/^\[\d{4}-\d{2}-\d{2}\] 裸文本$/.test(st1)) throw new Error('时间前缀缺失: ' + st1);
+if (stampI.stampDate('[2026-01-01] 已有戳') !== '[2026-01-01] 已有戳') throw new Error('不应重复加戳');
+console.log('时间前缀 + 防双戳 → ok');
 
 // 5) recall：标签过滤
 const r2 = await defs.tg_recall.execute({ tag: '#hindsight-tg' });
@@ -134,5 +140,27 @@ console.log('pre-step 注入 + 去重 → ok');
 
 await H['agent/turn-stopping']?.({ agent: { session: { header: { id: 't1' } } } });
 console.log('turn-stopping 静默降级（无 LLM key 不抛出）→ ok');
+
+// 14) P0 防反馈循环：promptTextOf 跳过插件自注入消息
+const I = (await import('../lib/index.js')).__internals;
+const fakeInjection = { id: 'x', role: 'user', content: [{ type: 'text', text: '<tg_memory>旧记忆快照</tg_memory>' }], source: { kind: 'plugin:tg-memory-bridge', form: 'recall' } };
+const p1 = I.promptTextOf([fakeInjection, { role: 'user', content: [{ type: 'text', text: '真实用户消息' }] }]);
+if (p1 !== '真实用户消息') throw new Error('P0: 应取真实用户消息，得: ' + p1);
+const p2 = I.promptTextOf([fakeInjection]);
+if (p2 !== '') throw new Error('P0: 纯注入消息应返回空');
+console.log('P0 防反馈循环（promptTextOf 跳过注入）→ ok');
+
+// 15) 乘法组合打分：proof_count 高者同条件下排名靠前
+const defsT = {};
+const cap = (d) => { defsT[d.name] = d; };
+apply(makeCtx(cap), { dataDir });
+const extra = [
+  { ts: Date.now() - 3600000, message_id: 21, chat_id: '-100123456', text: '偏好用 Vue 写前端', tags: ['#fact'], proof_count: 6 },
+  { ts: Date.now() - 3600000, message_id: 22, chat_id: '-100123456', text: '偏好用 Vue 的原因未知补充', tags: ['#fact'] },
+];
+fs.appendFileSync(path.join(dataDir, 'memory.jsonl'), extra.map((r) => JSON.stringify(r)).join('\n') + '\n');
+const qv = await defsT.tg_recall.execute({ query: '偏好' });
+if (qv.hits[0]?.text.includes('原因未知')) throw new Error('乘法打分：proof_count 高者应排前');
+console.log('乘法组合打分（proof 提升）→ ok，top1:', qv.hits[0]?.text.slice(0, 30));
 
 console.log('ALL OFFLINE TESTS PASSED');

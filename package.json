@@ -1,13 +1,24 @@
 {
   "name": "tg-memory-bridge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Telegram group as durable memory for DeepSeek Harness: tg_status / tg_retain / tg_recall / tg_forget / tg_digest / tg_pin + lifecycle auto-capture",
   "type": "module",
   "main": "lib/index.js",
-  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "telegram", "memory", "agents"],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "telegram",
+    "memory",
+    "agents"
+  ],
   "license": "MIT",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" }
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   }
 }

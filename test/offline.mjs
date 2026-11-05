@@ -300,5 +300,50 @@ const readIdx = (dir2) => fs.readFileSync(path.join(dir2, 'memory.jsonl'), 'utf8
   console.log('叙事抽取 gate（多 facts/空 facts/时间前缀）→ ok');
 }
 
+// 18) 相关记忆注入：prompt 命中 → 注入含【相关记忆】段 + permalink；无命中 → 无注入
+{
+  const d5 = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-mem-rel-'));
+  fs.writeFileSync(path.join(d5, 'memory.jsonl'), [
+    { ts: Date.now() - 60000, message_id: 601, chat_id: '-100123456', text: '用户偏好 socks5 代理上网', tags: ['#fact'] },
+    { ts: Date.now() - 60000, message_id: 602, chat_id: '-100123456', text: '无关条目：今天天气不错', tags: ['#fact'] },
+  ].map((r) => JSON.stringify(r)).join('\n') + '\n');
+  fs.writeFileSync(path.join(d5, 'state.json'), JSON.stringify({ chatId: '-100123456' }));
+  const ctx5 = makeCtx(() => {});
+  apply(ctx5, { dataDir: d5 });
+  ctx5.handlers['agent/session-start']?.({ agent: { session: { header: { id: 'r1' } } } });
+  const out = await ctx5.handlers['agent/pre-step']({ agent: { session: { header: { id: 'r1' } } } }, () => ({ kind: 'enter', messages: [{ role: 'user', content: [{ type: 'text', text: 'socks5 代理还能用吗' }] }] }));
+  const injText = out.messages[out.messages.length - 1]?.content?.[0]?.text ?? '';
+  if (!injText.includes('【相关记忆')) throw new Error('命中 prompt 应注入相关记忆段');
+  if (!injText.includes('socks5 代理上网') || !injText.includes('/c/123456/601')) throw new Error('相关记忆内容/永久链接缺失');
+  const out2 = await ctx5.handlers['agent/pre-step']({ agent: { session: { header: { id: 'r2' } } } }, () => ({ kind: 'enter', messages: [{ role: 'user', content: [{ type: 'text', text: '今天午饭吃什么' }] }] }));
+  if (out2.messages.length !== 1) throw new Error('无命中且无卡/digest 时不应注入');
+  console.log('相关记忆注入（命中/无命中/预算）→ ok');
+}
+// 19) 会话事件流去重（官方 lastInjectedText 同款，重启安全）+ 单元
+{
+  const I2 = (await import('../lib/index.js')).__internals;
+  const evs = [
+    { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '普通消息' }] } },
+    { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '更早的注入' }], source: { kind: 'plugin:tg-memory-bridge', form: 'recall' } } },
+    { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '普通消息2' }] } },
+  ];
+  if (I2.lastInjectedText(evs, 'tg-memory-bridge') !== '更早的注入') throw new Error('lastInjectedText 应反向扫描命中插件消息');
+  if (I2.lastInjectedText([], 'tg-memory-bridge') !== null) throw new Error('空事件流应返回 null');
+  const d6 = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-mem-ev-'));
+  fs.writeFileSync(path.join(d6, 'state.json'), JSON.stringify({ chatId: '-100123456', cardText: '卡片A' }));
+  const ctx6 = makeCtx(() => {});
+  apply(ctx6, { dataDir: d6 });
+  const out1 = await ctx6.handlers['agent/pre-step']({ agent: { session: { header: { id: 'e1' } } } }, () => ({ kind: 'enter', messages: [{ role: 'user', content: [{ type: 'text', text: '随便说' }] }] }));
+  const injected = out1.messages[out1.messages.length - 1].content[0].text;
+  if (!injected.includes('卡片A')) throw new Error('首次应注入');
+  // 新进程（sessions 为空），但会话事件里已有同内容注入 → 应跳过（重启安全）
+  const ctx7 = makeCtx(() => {});
+  apply(ctx7, { dataDir: d6 });
+  const sessionWithEvents = { header: { id: 'e1' }, events: [{ type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: injected }], source: { kind: 'plugin:tg-memory-bridge', form: 'recall' } } }] };
+  const out2 = await ctx7.handlers['agent/pre-step']({ agent: { session: sessionWithEvents } }, () => ({ kind: 'enter', messages: [{ role: 'user', content: [{ type: 'text', text: '随便说' }] }] }));
+  if (out2.messages.length !== 1) throw new Error('事件流去重失败：同内容不应再次注入');
+  console.log('会话事件流去重（重启安全）→ ok');
+}
+
 globalThis.fetch = realFetch;
 console.log('ALL OFFLINE TESTS PASSED');

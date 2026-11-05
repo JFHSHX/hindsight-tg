@@ -31,7 +31,7 @@
 | DSH 事件 | 行为 |
 |---|---|
 | `agent/session-start` | 就绪会话跟踪 |
-| `agent/pre-step` | 把置顶卡 + 最近 `#digest` 注入会话（消息形状照抄官方 `injectionMessage`；**内容变化才注入**） |
+| `agent/pre-step` | 把置顶卡 + 最近 `#digest` + **与本轮输入相关的记忆**（本地召回 top3，budget 内，官方 recall 注入同思路）注入会话（消息形状照抄官方 `injectionMessage`；内存态 + 会话事件流双保险去重，重启安全） |
 | `agent/turn-stopping` | 自动沉淀：LLM 门卫从本轮用户输入提取值得记住的事实 → 自动 `tg_retain`（无 LLM key 时静默降级） |
 | `agent/disposed` | 清理会话状态 |
 

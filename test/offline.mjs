@@ -345,5 +345,42 @@ const readIdx = (dir2) => fs.readFileSync(path.join(dir2, 'memory.jsonl'), 'utf8
   console.log('会话事件流去重（重启安全）→ ok');
 }
 
+// 20) 多卡心智模型：tg_pin(name) 创建→原位更新；profile 与命名卡互不干扰
+{
+  const d7 = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-mem-cards-'));
+  const dd = {};
+  const ctx8 = makeCtx((d) => { dd[d.name] = d; });
+  apply(ctx8, { dataDir: d7, token: '123456789:AAFakeTokenForOfflineTests00000' });
+  fs.writeFileSync(path.join(d7, 'state.json'), JSON.stringify({ chatId: '-100123456', pinnedMessageId: 54, cardText: '主卡旧' }));
+  tgCalls.length = 0;
+  const r1 = await dd.tg_pin.execute({ text: '项目卡 v1', name: '项目卡' });
+  if (!r1.ok || r1.name !== '项目卡' || r1.edited) throw new Error('命名卡应新建');
+  if (!tgCalls.some((c) => c.method === 'pinChatMessage' && c.payload.message_id === r1.message_id)) throw new Error('命名卡应置顶');
+  const st = JSON.parse(fs.readFileSync(path.join(d7, 'state.json'), 'utf8'));
+  if (st.pinnedMessageId !== 54 || st.cardText !== '主卡旧') throw new Error('主卡不应被动');
+  if (!st.cards?.['项目卡']?.message_id) throw new Error('命名卡未入 state.cards');
+  tgCalls.length = 0;
+  const r2 = await dd.tg_pin.execute({ text: '项目卡 v2', name: '项目卡' });
+  if (!r2.edited || tgCalls.some((c) => c.method === 'sendMessage')) throw new Error('命名卡第二次应原位编辑，不发新消息');
+  if (JSON.parse(fs.readFileSync(path.join(d7, 'state.json'), 'utf8')).cards['项目卡'].text !== '项目卡 v2') throw new Error('命名卡文本未更新');
+  const r3 = await dd.tg_pin.execute({ text: '主卡新' });
+  if (r3.name !== 'profile' || !r3.edited) throw new Error('缺省 name 应走 profile 原位更新');
+  if (JSON.parse(fs.readFileSync(path.join(d7, 'state.json'), 'utf8')).cardText !== '主卡新') throw new Error('主卡文本未更新');
+  console.log('多卡心智模型（create/edit/隔离）→ ok');
+}
+// 21) tg_edit 命中命名卡 → cards[n].text 同步
+{
+  const d8 = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-mem-edit-'));
+  fs.writeFileSync(path.join(d8, 'state.json'), JSON.stringify({ chatId: '-100123456', pinnedMessageId: 54, cardText: '主卡', cards: { '项目卡': { message_id: 55, text: '旧项目卡' } } }));
+  const de = {};
+  const ctx9 = makeCtx((d) => { de[d.name] = d; });
+  apply(ctx9, { dataDir: d8, token: '123456789:AAFakeTokenForOfflineTests00000' });
+  tgCalls.length = 0;
+  await de.tg_edit.execute({ message_id: 55, text: '新项目卡内容' });
+  const st = JSON.parse(fs.readFileSync(path.join(d8, 'state.json'), 'utf8'));
+  if (st.cards['项目卡'].text !== '新项目卡内容' || st.cardText !== '主卡') throw new Error('命名卡同步失败');
+  console.log('tg_edit 命名卡同步 → ok');
+}
+
 globalThis.fetch = realFetch;
 console.log('ALL OFFLINE TESTS PASSED');

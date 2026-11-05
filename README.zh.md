@@ -24,7 +24,7 @@
 | `tg_forget` | 删除记忆：TG 消息撤回 + 本地索引移除（双侧） |
 | `tg_edit` | 修改已发送的消息：TG 消息与本地索引同步更新；若目标为置顶卡则同步 cardText |
 | `tg_digest` | 整理：新记忆与最近一条 `#digest` **对账**，按 reinforce（佐证+1）/ refine（原位修正，"此前…现在…"保留历史）/ new（新主题）三态应用，维护 `proof_count`/`evidence_quotes` 证据链；配了 LLM key 走内置中转，未配 key 返回待整理清单转交**会话子代理**，对账后用 `commit` 参数回传 |
-| `tg_pin` | 置顶画像卡整卡重写（心智模型层） |
+| `tg_pin` | 置顶卡整卡重写（心智模型层）：缺省=主画像卡（digest 自动重写它）；给 `name` 可钉**多张命名卡**（项目卡/偏好卡…），首次发送并置顶，之后原位编辑不挤掉其他置顶 |
 
 ## 生命周期自动化（借鉴官方 hindsight-coding-agents 的 DSH 集成）
 
@@ -92,7 +92,7 @@ pnpm add link:~/.dsh/plugins/hindsight-tg
 
 - Bot API 没有消息搜索/读历史接口，也没有消息删除事件——模型召回只能走本地索引，删除记忆只能走 `tg_forget`
 - 索引自 bot 上线起累积，不能回填历史
-- 置顶位只有一个（多心智模型卡受 TG 限制）
+- ~~置顶位只有一个~~ **已实测推翻（2026-11-06）**：TG 群支持多置顶共存，`pinChatMessage` 是往置顶列表**追加**。两个 API 怪癖：`getChat.pinned_message` 只回"发送日期最新"的一条（且有缓存延迟）；`unpinChatMessage` 对未置顶消息也静默 ok（不能当探针）。插件用 `state.cards` 记账各命名卡
 
 ## License
 

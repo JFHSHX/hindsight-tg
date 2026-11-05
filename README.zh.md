@@ -23,7 +23,7 @@
 | `tg_recall` | 本地索引检索：关键词 + 标签 + 新近度 → 返回 t.me 永久链接 |
 | `tg_forget` | 删除记忆：TG 消息撤回 + 本地索引移除（双侧） |
 | `tg_edit` | 修改已发送的消息：TG 消息与本地索引同步更新；若目标为置顶卡则同步 cardText |
-| `tg_digest` | 整理：把上次整理以来的记忆归纳成 `#digest`（带证据引用）+ 自动重写置顶卡；配了 LLM key 走内置中转，未配 key 返回待整理清单转交**会话子代理**，归纳后用 `commit` 参数回传 |
+| `tg_digest` | 整理：新记忆与最近一条 `#digest` **对账**，按 reinforce（佐证+1）/ refine（原位修正，"此前…现在…"保留历史）/ new（新主题）三态应用，维护 `proof_count`/`evidence_quotes` 证据链；配了 LLM key 走内置中转，未配 key 返回待整理清单转交**会话子代理**，对账后用 `commit` 参数回传 |
 | `tg_pin` | 置顶画像卡整卡重写（心智模型层） |
 
 ## 生命周期自动化（借鉴官方 hindsight-coding-agents 的 DSH 集成）
@@ -84,7 +84,7 @@ pnpm add link:~/.dsh/plugins/hindsight-tg
 
 ## 隐私与安全
 
-- **Memory Defense**：所有写入（含自动沉淀）经过密钥/凭据正则扫描（`sk-`/`ghp_`/`AKIA`/`xox`/私钥块/bot token 等 7 类），命中即拒绝写入；配置 `defense: false` 可关闭
+- **Memory Defense**：所有写入（含自动沉淀）经过密钥/凭据正则扫描（LLM keys 全家、GitHub 六兄弟、DB 连接串、JWT/PEM、slack/discord/telegram、信用卡 Luhn 等 30+ 类；ASCII 边界修复 CJK 邻接漏检），默认 **redact** 脱敏入库（`[REDACTED:type]`，官方同款），`defense:'block'|false` 可改拦截/关闭
 - 记忆明文存在 Telegram 服务器上——把它当"个人可见的笔记本"，不要依赖它存敏感内容
 - 本仓库不含任何真实 token/chat_id；你的配置在 `~/.dsh/tg-memory/`（已被 .gitignore 覆盖）
 

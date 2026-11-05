@@ -18,7 +18,7 @@ Pure Node (zero dependencies), installed as a DSH cordis plugin.
   `agent/pre-step` injects the card + latest `#digest` (change-deduplicated, official `injectionMessage` shape);
   `agent/turn-stopping` auto-captures durable facts from the user's prompt via an LLM gate
   (graceful no-key degradation); a proactive memory ruleset is injected as a system prompt section
-- **Memory Defense**: regex screening for secrets/credentials on every write (7 pattern classes), blocked before sending
+- **Memory Defense**: regex screening for secrets/credentials on every write (30+ pattern classes, CJK-safe ASCII boundaries, Luhn credit-card validation), redacted to `[REDACTED:type]` by default (`defense:'block'|false` to block or disable)
 - **7 tools**: `tg_status` / `tg_retain` / `tg_recall` / `tg_forget` / `tg_edit` / `tg_digest` / `tg_pin`
 
 See [README.zh.md](./README.zh.md) for the full guide (install, config, four-layer mapping, known limits).

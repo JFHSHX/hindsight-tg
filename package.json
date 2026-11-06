@@ -1,6 +1,6 @@
 {
   "name": "tg-memory-bridge",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Telegram group as durable memory for DeepSeek Harness: tg_status / tg_retain / tg_recall / tg_forget / tg_edit / tg_digest / tg_pin + lifecycle auto-capture; tg_digest hands off to session subagents when no LLM key is set (commit-based)",
   "type": "module",
   "main": "lib/index.js",

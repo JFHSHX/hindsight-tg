@@ -382,5 +382,38 @@ const readIdx = (dir2) => fs.readFileSync(path.join(dir2, 'memory.jsonl'), 'utf8
   console.log('tg_edit 命名卡同步 → ok');
 }
 
+// 22) tg_status 回归（v0.4.1 曾 ReferenceError: chatId is not defined）：发现群→写 state→返回 chatId→多卡透出
+{
+  const d9 = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-mem-status-'));
+  const ds = {};
+  apply(makeCtx((d) => { ds[d.name] = d; }), { dataDir: d9, token: '123456789:AAFakeTokenForOfflineTests00000' });
+  globalThis.fetch = async (url, options = {}) => {
+    const u = String(url);
+    if (!u.includes('api.telegram.org')) return realFetch(url, options);
+    const method = u.split('/').pop().split('?')[0];
+    const result = method === 'getMe'
+      ? { id: 1, username: 'status_test_bot' }
+      : method === 'getUpdates'
+        ? [{ message: { chat: { id: -1009876543, title: '状态测试群', type: 'supergroup' } } }]
+        : true;
+    return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, result }), json: async () => ({ ok: true, result }) };
+  };
+  const s1 = await ds.tg_status.execute({});
+  if (!s1.ok || s1.bot !== '@status_test_bot') throw new Error('tg_status getMe 解析失败');
+  if (s1.chatId !== '-1009876543') throw new Error('tg_status 应发现并返回群 chatId，实际: ' + JSON.stringify(s1.chatId));
+  if (JSON.parse(fs.readFileSync(path.join(d9, 'state.json'), 'utf8')).chatId !== '-1009876543') throw new Error('发现的 chatId 应写入 state');
+  if (!s1.chats.some((c) => c.id === '-1009876543' && c.type === 'supergroup')) throw new Error('chats 列表缺发现的群');
+  // 已有 state（多卡）时：chatId 取 state，且置顶卡列表透出
+  const d10 = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-mem-status2-'));
+  fs.writeFileSync(path.join(d10, 'state.json'), JSON.stringify({ chatId: '-100123456', pinnedMessageId: 54, cards: { '项目卡': { message_id: 55 } } }));
+  const ds2 = {};
+  apply(makeCtx((d) => { ds2[d.name] = d; }), { dataDir: d10, token: '123456789:AAFakeTokenForOfflineTests00000' });
+  const s2 = await ds2.tg_status.execute({});
+  if (s2.chatId !== '-100123456') throw new Error('已有 state.chatId 时应原样返回，实际: ' + s2.chatId);
+  if (!s2.cards.includes('profile(#54)') || !s2.cards.includes('项目卡(#55)')) throw new Error('置顶卡列表缺失: ' + s2.cards);
+  globalThis.fetch = realFetch;
+  console.log('tg_status 状态检查（发现群/写 state/多卡透出）→ ok');
+}
+
 globalThis.fetch = realFetch;
 console.log('ALL OFFLINE TESTS PASSED');

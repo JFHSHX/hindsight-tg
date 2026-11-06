@@ -1,6 +1,6 @@
 # Hindsight Windows 本地部署实录（路线 B）——只有真部署才知道的事
 
-> 整理日期：2026-11-06。来源：生产部署机实测（Windows 11 + PostgreSQL + Hindsight API，**写作时服务正在运行**）+ 部署期排障记录。
+> 整理日期：2026-11-06（同日整理版：附录新坑升格为坑⑫、运维速查补端点自描述、全文交叉引用补全；实测内容未删改）。来源：生产部署机实测（Windows 11 + PostgreSQL + Hindsight API，**写作时服务正在运行**）+ 部署期排障记录。
 > 机制层的参数级侦察见同目录 [hindsight-intel.md](hindsight-intel.md)；本篇只写**官方文档不会告诉你的部分**：实测数字、静默失败、平台特有的坑。
 > 所有数字均为部署机（`C:\ds\hindsight-native`）实测，非转述。
 
@@ -46,18 +46,18 @@ Windows 原生跑起 Hindsight API + PostgreSQL，embedding 换本地 ONNX 中�
 ### ⑤ API 不热加载模型改动
 - 现象：改了 `env.ps1` 里的模型配置，运行中的进程毫无反应。
 - 根因：API 启动时读定模型配置，进程存活期内保持旧值。
-- 解法：改配置必须走重启链（`启动Hindsight.bat` 或 `start-all-hindsight.ps1`）。「为什么改了没反应」排查第一名。
+- 解法：改配置必须走重启链（`启动Hindsight.bat` 或 `start-all-hindsight.ps1`）。「为什么改了没反应」排查第一名；第一落点就是启动回显（附录 A）——回显即生效配置的快照。
 
 ### ⑥ 慢中转下 reflect 静默超时
 - 现象：reflect / consolidation / mental-model 刷新全部没有产出，界面无报错。
 - 根因：LLM 默认超时 30 s；走中转网关（慢）时全部超时，且这些是**后台任务，静默失败**，只有 `api.log` 有痕迹。
 - 解法：四个 LLM 超时全部调到 300 s，wall-clock 1800 s：
-  `HINDSIGHT_API_LLM_TIMEOUT` / `HINDSIGHT_API_REFLECT_LLM_TIMEOUT` / `HINDSIGHT_API_MENTAL_MODEL_REFRESH_LLM_TIMEOUT` / `HINDSIGHT_API_CONSOLIDATION_LLM_TIMEOUT` = 300；`HINDSIGHT_API_REFLECT_WALL_TIMEOUT` = 1800。
+  `HINDSIGHT_API_LLM_TIMEOUT` / `HINDSIGHT_API_REFLECT_LLM_TIMEOUT` / `HINDSIGHT_API_MENTAL_MODEL_REFRESH_LLM_TIMEOUT` / `HINDSIGHT_API_CONSOLIDATION_LLM_TIMEOUT` = 300；`HINDSIGHT_API_REFLECT_WALL_TIMEOUT` = 1800。长龄化的日志实锤见附录 E。
 
 ### ⑦ 云端模型会下线
 - 现象：reflect/consolidation 全挂，日志刷 `upstream_404`。
 - 根因：NVIDIA NCF 上的 `nemotron-3-super-120b-a12b` 函数直接下线（404）；中转网关还叠加间歇 503（CF 1102）。
-- 解法：LLM 供应商按「会消失」设计，预留回退链（实测可用：本地 npg 网关 `http://127.0.0.1:8787/v1` + `moonshotai/kimi-k3`，当日实测 200 / 5.8 s）。换供应商后同样要重启（坑⑤）。
+- 解法：LLM 供应商按「会消失」设计，预留回退链（实测可用：本地 npg 网关 `http://127.0.0.1:8787/v1` + `moonshotai/kimi-k3`，当日实测 200 / 5.8 s）。换供应商后同样要重启（坑⑤）。长龄化症状见附录 E。
 
 ### ⑧ PowerShell 脚本签名是自动化的隐形杀手
 - 现象：AllSigned 环境里改一行 `env.ps1` → 脚本拒绝运行（「未对文件进行数字签名」）。
@@ -76,6 +76,11 @@ Windows 原生跑起 Hindsight API + PostgreSQL，embedding 换本地 ONNX 中�
 ### ⑪ Windows 事件循环：uvloop 不可用，官方走 winloop
 - 日志原文：`winloop installed as asyncio event loop policy (Windows uvloop port)`。
 - 结论：uvloop 是 Linux 专属；Windows 部署时 API 自动切到 winloop（uvloop 的 Windows 移植）。性能略逊于 uvloop 但远好于默认 asyncio——不要试图手改事件循环。
+
+### ⑫ 本地 Reranker 权重错位——服务可用但有损（自附录 B 升格）
+- 现象：换本地 reranker 后启动日志出现 `WARNING ... Reranker[...]: copied 201/203 misaligned…`，服务正常起、无任何报错。
+- 根因：safetensors 转换/版本不匹配导致部分权重张量形状错位，被**静默跳过**——重排质量带伤，且没有第二个征兆。
+- 解法：换本地 reranker 后必扫启动日志的 misaligned 计数；出现即优先怀疑模型文件转换问题（重新转换/换 revision），不要继续调参。日志原文见附录 B。
 
 ## 3. 复现步骤（可行动）
 
@@ -116,6 +121,8 @@ Windows 原生跑起 Hindsight API + PostgreSQL，embedding 换本地 ONNX 中�
 3. `POST /mcp` 可达；
 4. **金丝雀**：retain 一条 → search 命中 → reflect 跑通（超时参数生效的证明）。
 
+接入前另拉一次 `/openapi.json`（附录 F）——端点/参数自描述，能省一半 404 探测。
+
 ### 3.4 部署节奏
 
 小步验证优先：ONNX 兼容探针（模型能加载、维度对）→ 批量打分小样本（batch 10）→ 改 `env.ps1` → **重签**（坑⑧）→ 重启 → 金丝雀四连。任何一步红了不要进下一步。
@@ -132,6 +139,7 @@ Windows 原生跑起 Hindsight API + PostgreSQL，embedding 换本地 ONNX 中�
 | 模型缓存 | `%USERPROFILE%\.cache\huggingface`（~562 MB，首次下载 ~500 MB，之后走缓存秒起） |
 | 脚本签名 | CN=HindsightLocal 自签证书，重签流程见坑⑧ |
 | 库量参考 | memory_units 4812 + chunks 689，`vector(512)` |
+| 端点自描述 | `/docs`（Swagger UI）、`/openapi.json`——接入前先拉，404 探测少做一半（附录 F） |
 
 ## 5. 与本仓库的关系
 
@@ -160,7 +168,7 @@ winloop installed as asyncio event loop policy (Windows uvloop port)
 
 要点：启动时把全部生效配置回显一遍——**改完配置看这段就知道有没有生效**（坑⑤的第一排查点）；数据源是 `local`+`local` 时即为路线 B 形态。
 
-### B. 本地 Reranker 权重错位——新坑，服务可用但有损
+### B. 本地 Reranker 权重错位（证据存档，结论已升格为坑⑫）
 
 ```
 2026-11-06 08:44:11,272 - WARNING - hindsight_api.engine.local_device - Reranker[cross-encoder/mmarco-mMiniLMv2-L12-H384-v1]: copied 201/203 misaligned…
@@ -196,7 +204,7 @@ reflect 产物有结构校验，不合格会 `rejected (attempt N)` 自动重试
 
 consolidation 任务 `age=4578s`（**75 分钟**）仍停在 `attempt=1/4`——中转网关慢时后台任务就这样长龄化排队；`[WORKER_STATS] slots=2/10` 说明不是并发不够，是 LLM 往返太慢。看到 age 数千秒先查网关，别加槽位。
 
-### F. 端点自描述（探测无需翻文档）
+### F. 端点自描述（证据存档，要点已并入 3.3 与运维速查）
 
 `/docs`（Swagger UI）与 `/openapi.json` 均 200——FastAPI 自带。**接本地 API 前先拉 `/openapi.json`**，全部端点/参数自描述，404 探测可以少做一半。
 

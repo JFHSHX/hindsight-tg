@@ -73,6 +73,10 @@ Windows 原生跑起 Hindsight API + PostgreSQL，embedding 换本地 ONNX 中�
 - 根因：Hindsight 依赖链里的 `v8go` 没有 Windows 支持（cgo 编译不过）。
 - 结论：**API + PostgreSQL 可以原生，嵌入 Hindsight 的 agent 运行时仍需 WSL2 / Docker**。部署前想清楚这个边界——「原生部署」是服务原生，不是全家原生。
 
+### ⑪ Windows 事件循环：uvloop 不可用，官方走 winloop
+- 日志原文：`winloop installed as asyncio event loop policy (Windows uvloop port)`。
+- 结论：uvloop 是 Linux 专属；Windows 部署时 API 自动切到 winloop（uvloop 的 Windows 移植）。性能略逊于 uvloop 但远好于默认 asyncio——不要试图手改事件循环。
+
 ## 3. 复现步骤（可行动）
 
 ### 3.1 关键配置（`env.ps1`，已脱敏）
@@ -123,7 +127,8 @@ Windows 原生跑起 Hindsight API + PostgreSQL，embedding 换本地 ONNX 中�
 | API | `http://127.0.0.1:8888`（`/health` 探活） |
 | 面板 | `http://127.0.0.1:9999/dashboard` |
 | MCP | `http://127.0.0.1:8888/mcp` |
-| PID 文件 | `C:\ds\hindsight-native\run\api.pid` |
+| PID 文件 | `C:\ds\hindsight-native\run\api.pid`（日志 `run\api.log` / `run\api.err.log`） |
+| PostgreSQL 数据目录 | `%USERPROFILE%\.pg0\instances\hindsight\data`（pg0 实例布局，`pg_ctl -D <该目录>` 管理） |
 | 模型缓存 | `%USERPROFILE%\.cache\huggingface`（~562 MB，首次下载 ~500 MB，之后走缓存秒起） |
 | 脚本签名 | CN=HindsightLocal 自签证书，重签流程见坑⑧ |
 | 库量参考 | memory_units 4812 + chunks 689，`vector(512)` |
@@ -132,6 +137,68 @@ Windows 原生跑起 Hindsight API + PostgreSQL，embedding 换本地 ONNX 中�
 
 - [hindsight-intel.md](hindsight-intel.md)：机制层侦察（TEMPR 四路检索、observations 整合、Memory Defense 45 类、论文数字）——**borrow 的依据**。
 - 本篇：部署层实录——**borrow 落地（v0.3.0/v0.4.x）过程中反向验证过部署机的真实行为**，也是给「想在 Windows 上自己跑一套 Hindsight」的人的路书。
+
+---
+
+## 附录：日志实录（2026-11-06，`run\api.log` 节选，当日实例）
+
+以下全部为本机运行日志原文节选（DB 密码为 API 自带脱敏 `***`；bank 名与查询串已截断）。
+
+### A. 启动回显——配置即证据（对应 3.1 全表 + 坑⑪）
+
+```
+2026-11-06 08:43:57,167 - INFO - hindsight_api.config - Database: postgresql://***:***@127.0.0.1:5432/hindsight (schema: public)
+2026-11-06 08:43:57,167 - INFO - hindsight_api.config - LLM: provider=openai, model=nvidia/nemotron-3.5-super-vl-120b-a12b
+2026-11-06 08:43:57,167 - INFO - hindsight_api.config - Embeddings: provider=local
+2026-11-06 08:43:57,168 - INFO - hindsight_api.config - Reranker: provider=local
+2026-11-06 08:43:57,168 - INFO - hindsight_api.config - Graph retriever: link_expansion
+2026-11-06 08:44:02,068 - INFO - ...openai_compatible_llm - OpenAI-compatible client initialized: provider=openai, model=nvidia/nemotron-3.5-super-vl-120b-a12b, base_url=<中转网关>/v1
+2026-11-06 08:44:02,734 - INFO - hindsight_api.api.mcp - MCP servers created (stateless_http=False)
+2026-11-06 08:44:02,984 - INFO - hindsight_api.api - MCP server enabled at /mcp/
+winloop installed as asyncio event loop policy (Windows uvloop port)
+```
+
+要点：启动时把全部生效配置回显一遍——**改完配置看这段就知道有没有生效**（坑⑤的第一排查点）；数据源是 `local`+`local` 时即为路线 B 形态。
+
+### B. 本地 Reranker 权重错位——新坑，服务可用但有损
+
+```
+2026-11-06 08:44:11,272 - WARNING - hindsight_api.engine.local_device - Reranker[cross-encoder/mmarco-mMiniLMv2-L12-H384-v1]: copied 201/203 misaligned…
+```
+
+203 个权重张量成功复制 201，2 个形状错位被跳过。**无碍启动、不报错、但重排质量带伤**——换本地 reranker 后务必扫一遍这条 WARNING；出现 misaligned 时优先怀疑 safetensors 转换/版本不匹配。
+
+### C. reflect agent 的自校验重试
+
+```
+2026-11-06 08:47:31,800 - INFO - ...reflect.agent - [REFLECT hermes-95928] done | query='Summarize the "dsh-win-compat 插件…"'
+2026-11-06 08:48:31,554 - WARNING - ...reflect.agent - [REFLECT hermes-58804] done document rejected (attempt 1): document: not vali…
+```
+
+reflect 产物有结构校验，不合格会 `rejected (attempt N)` 自动重试——看到 rejected 不是故障，是闭环在工作。
+
+### D. mental model 增量刷新的直接证据（对应 intel 篇「增量编辑」设计）
+
+```
+2026-11-06 08:44:55,503 - INFO - ...memory_engine - refresh_mental_model task queued for bank_id=hermes …
+2026-11-06 08:48:24,574 - INFO - ...memory_engine - [MENTAL_MODELS] Delta refresh for mm-b25f05b1…: applied 6
+2026-11-06 08:48:25,667 - INFO - ...memory_engine - [REFRESH_MENTAL_MODEL_TASK] Completed for bank_id=hermes …
+```
+
+从排队到完成 ~3.5 分钟（含慢 LLM）；`Delta refresh … applied 6` 即「只应用新知识蕴含的变更、其余物理不动」的日志形态。
+
+### E. 慢中转下的后台任务长龄化（坑⑥⑦的日志实锤）
+
+```
+2026-11-06 12:19:15,691 - INFO - ...worker.poller - [WORKER_TASK] op=6e7c20b3… type=consolidation bank=hermes age=4578s stage=llm.openai.consolidation.attempt=1/4 stage_age=62s
+2026-11-06 12:19:15,691 - INFO - ...worker.poller - [WORKER_TASK] op=53a14504… type=refresh_mental_model age=518s stage=llm.openai.mental_model_delta_ops.attempt=2/4 stage_age=111s
+```
+
+consolidation 任务 `age=4578s`（**75 分钟**）仍停在 `attempt=1/4`——中转网关慢时后台任务就这样长龄化排队；`[WORKER_STATS] slots=2/10` 说明不是并发不够，是 LLM 往返太慢。看到 age 数千秒先查网关，别加槽位。
+
+### F. 端点自描述（探测无需翻文档）
+
+`/docs`（Swagger UI）与 `/openapi.json` 均 200——FastAPI 自带。**接本地 API 前先拉 `/openapi.json`**，全部端点/参数自描述，404 探测可以少做一半。
 
 ---
 
